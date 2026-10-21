@@ -1,6 +1,7 @@
 name: verify-matrix
 # Proves the packaged system on platforms a dev box usually cannot: real arm64 (what Apple
-# Silicon Macs run) and a Windows checkout (line endings, compose parse).
+# Silicon Macs run) and a Windows checkout (line endings, compose parse). Windows runners cannot run
+# Linux containers, so Windows is LF + compose parse only.
 # Replace every <placeholder>. Delete the token step if the app has no admin token.
 on:
   push:
@@ -38,7 +39,13 @@ jobs:
           docker compose restart && docker compose up -d --wait
           after=$(docker compose exec -T <service> sh -c 'cat /run/app-secrets/* | sha256sum')
           test "$before" = "$after"
-      - run: test "$(docker compose exec -T <service> id -u)" != 0
+      - name: every container non-root, one-shots included (backup excepted)
+        run: |
+          for s in $(docker compose ps -a --services); do
+            [ "$s" = backup ] && continue
+            u=$(docker inspect -f '{{.Config.User}}' $(docker compose ps -aq "$s")); echo "$s user=$u"
+            case "$u" in ""|root|0|0:*) exit 1;; esac
+          done
       - if: failure()
         run: docker compose logs
   windows-checkout:

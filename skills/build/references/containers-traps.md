@@ -105,3 +105,52 @@ Format:
 - Symptom: the PR showed conflicts in files the skill never touched (identity.ts, writeHandler.ts); merging would have shipped 8 unrelated local commits.
 - Cause: the worktree branched from local HEAD, which was 8 commits ahead of origin/main.
 - Fix: branch from `origin/<default>` after `git fetch` (step 2). Rebuilt by cherry-picking only the packaging commits onto origin/main; PR then showed 13 files, all ours.
+
+## Root `secrets-init` breaks "every container non-root"
+- Seen: a Python reply app and a Node enrichment API, 2026-10-19
+- Cause: the template's `alpine` one-shot ran as root to write the secrets volume.
+- Fix: the app image owns `/run/app-secrets` (`COPY --chown`), and its entrypoint generates missing secrets only when compose sets `APP_SECRETS_GENERATE=1`, so hosted deploys skip it. `secrets-init` is the app image as its own user; `db` runs `user: postgres`. Template in containers.md changed.
+
+## `Warning ... error from registry: denied` before every build
+- Seen: a Python reply app and an LLM runtime, 2026-10-19
+- Symptom: a user not logged in to ghcr.io sees a pull error, then the build starts. Siblings on the same tag without `build:` (`migrate`) stop the install with `pull access denied`.
+- Cause: compose tries `image:` first and falls back to `build:` only for the service that has it.
+- Fix: `pull_policy: never` on siblings. Ship `install.sh` that runs `docker compose pull --quiet app` and builds on failure, or list the warning in INSTALL.md as harmless.
+
+## `:latest` never published on a tag push
+- Seen: a Python reply app and a Node enrichment API, 2026-10-19
+- Cause: `type=raw,value=latest,enable={{is_default_branch}}` in docker/metadata-action is false on tag refs.
+- Fix: `enable=${{ startsWith(github.ref, 'refs/tags/v') }}` with `flavor: latest=false`. `assets/publish.yml` changed.
+
+## `docker login ghcr.io` with `gh auth token` gets `denied`
+- Seen: an agent-crew stack, 2026-10-19
+- Cause: `gh auth login` does not grant `read:packages`.
+- Fix: installers run `gh auth refresh -h github.com -s read:packages` before `gh auth token | docker login ghcr.io -u <user> --password-stdin`. INSTALL.md template step 2 changed.
+
+## Run lock never released after a crash
+- Seen: an LLM runtime and an agent-crew stack, 2026-10-19
+- Symptom: resume refuses forever with "already running".
+- Cause: the lock stores a PID and counts it stale only if that PID is dead. In a container the server is PID 1 on every start, so the dead owner's PID is alive again.
+- Fix: kernel file locks (`flock`), released when the process dies, or clear the lock files in the entrypoint at container start (one container per volume).
+
+## workerd/wrangler image: TLS fails, state dir unwritable, healthcheck fills disk
+- Seen: a self-hosted MCP Worker, 2026-10-19
+- Cause: slim base without `ca-certificates`; `wrangler dev --persist-to <dir>` not created and owned by the runtime user in the image; an MCP healthcheck that called `initialize`, where each session writes ~1 MB of Durable Object state.
+- Fix: install `ca-certificates`, create and chown the persist dir in the Dockerfile, health-check a plain HTTP route that opens no MCP session.
+
+## `migrate` exits 1 after `docker compose restart`
+- Seen: a Node + Postgres app, 2026-10-19
+- Symptom: `getaddrinfo ENOTFOUND postgres` or `ECONNREFUSED` in migrate logs after a restart.
+- Cause: `depends_on` conditions only gate `up`; `restart` starts the one-shot while postgres is still coming back.
+- Fix: the one-shot retries until postgres accepts connections (loop in the command or the script), and step 4 checks its exit code after a restart before any `up`. Template and step 4 changed; `ollama-pull` got the same loop.
+
+## Every Actions job fails at once with a billing message
+- Seen: one GitHub org, 2026-10-19
+- Cause: GitHub-hosted Actions blocked org-wide by billing.
+- Fix: install a third-party runner app on the org and swap the `runs-on` labels in both assets. Windows runners (either kind) cannot run Linux containers, so Windows checks stay LF + compose parse.
+
+## Parallel tests break each other
+- Seen: several dockerize runs on one daemon, 2026-10-19
+- Symptom: another agent's test loses its containers, images or cache mid-run.
+- Cause: cleanup by prune or by time window removes every run's resources, not just its own. `/tmp` is tmpfs, off Docker's disk.
+- Fix: test in a dir on Docker's disk, a unique `-p` project and image tag, and remove only that project and exact tags. Never `prune` or delete by age. Step 4 changed.

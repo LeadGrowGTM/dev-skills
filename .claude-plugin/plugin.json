@@ -1,6 +1,6 @@
 {
   "name": "dev-skills",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Dev skills for Claude Code: batch-grill a plan before building it, build and debug test-first, deploy on Cloudflare, trigger.dev and Supabase without the known traps, write and tune evals for skills and prompts, and package a repo as a one-command Docker install or a Claude Code plugin.",
   "author": { "name": "LeadGrow" },
   "license": "MIT",
