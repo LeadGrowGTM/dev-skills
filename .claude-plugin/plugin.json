@@ -1,0 +1,9 @@
+{
+  "name": "dev-skills",
+  "version": "1.0.0",
+  "description": "Dev skills for Claude Code: batch-grill a plan before building it, write and tune evals for skills and prompts, and package a repo as a one-command Docker install or a Claude Code plugin.",
+  "author": { "name": "LeadGrow" },
+  "license": "MIT",
+  "repository": "https://github.com/LeadGrowGTM/dev-skills",
+  "keywords": ["evals", "plan-review", "docker", "plugins", "skills"]
+}

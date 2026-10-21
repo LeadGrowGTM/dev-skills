@@ -1,0 +1,58 @@
+name: verify-matrix
+# Proves the packaged system on platforms a dev box usually cannot: real arm64 (what Apple
+# Silicon Macs run) and a Windows checkout (line endings, compose parse).
+# Replace every <placeholder>. Delete the token step if the app has no admin token.
+on:
+  push:
+    branches: [dockerize]
+    paths: ["<compose dir>/**", Dockerfile, docker-entrypoint.sh, .github/workflows/verify-matrix.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    env:
+      APP_IMAGE: verify:local          # build from this commit, not the published tag
+    defaults:
+      run:
+        working-directory: <compose dir>   # "." if compose.yaml is at the repo root
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build --wait --wait-timeout 900
+      - run: docker compose ps -a
+      - run: curl -fsS "http://$(docker compose port <service> <port>)<health route>"
+      - name: token required, then accepted
+        run: |
+          U="http://$(docker compose port <service> <port>)<authenticated read route>"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$U")" = 401
+          TOKEN=$(docker compose exec -T <service> cat /run/app-secrets/<TOKEN_NAME>)
+          curl -fsS -H "Authorization: Bearer $TOKEN" "$U" >/dev/null
+      - name: second start keeps secrets
+        run: |
+          before=$(docker compose exec -T <service> sh -c 'cat /run/app-secrets/* | sha256sum')
+          docker compose restart && docker compose up -d --wait
+          after=$(docker compose exec -T <service> sh -c 'cat /run/app-secrets/* | sha256sum')
+          test "$before" = "$after"
+      - run: test "$(docker compose exec -T <service> id -u)" != 0
+      - if: failure()
+        run: docker compose logs
+  windows-checkout:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - name: shipped scripts and compose stay LF on a Windows checkout
+        shell: pwsh
+        run: |
+          foreach ($f in 'docker-entrypoint.sh','<compose dir>/compose.yaml','Dockerfile') {
+            if ((Get-Content -Raw $f) -match "`r") { Write-Error "$f has CRLF"; exit 1 } else { "$f LF ok" }
+          }
+      - name: compose file parses on Windows
+        shell: pwsh
+        working-directory: <compose dir>
+        run: docker compose config -q; if ($LASTEXITCODE -ne 0) { exit 1 }; "compose config ok"
