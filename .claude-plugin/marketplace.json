@@ -3,6 +3,6 @@
   "description": "Dev skills for Claude Code: plan grilling, evals and packaging.",
   "owner": { "name": "LeadGrow" },
   "plugins": [
-    { "name": "dev-skills", "source": "./", "description": "Dev skills for Claude Code: batch-grill a plan before building it, write and tune evals for skills and prompts, and package a repo as a one-command Docker install or a Claude Code plugin." }
+    { "name": "dev-skills", "source": "./", "description": "Dev skills for Claude Code: batch-grill a plan before building it, build test-first, write and tune evals for skills and prompts, and package a repo as a one-command Docker install or a Claude Code plugin." }
   ]
 }
