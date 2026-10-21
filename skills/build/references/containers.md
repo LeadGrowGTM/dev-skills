@@ -36,15 +36,24 @@ Work in a git worktree off the remote's default branch, not local HEAD: `git fet
 - `# syntax=docker/dockerfile:1` first line. Multi-stage: `build` stage with full tooling, final stage on a pinned slim base holding only runtime output and production deps.
 - If the build output is architecture-independent (bundled JS, Go with `GOARCH`), start the build stage with `FROM --platform=$BUILDPLATFORM` and keep `RUN` out of the final stage. arm64 then builds without QEMU.
 - Copy lockfile and install deps before copying source. Non-root user. Exec-form `CMD`/`ENTRYPOINT`. `EXPOSE` the port.
+- The final stage creates `/run/app-secrets` owned by the runtime user (`RUN mkdir /empty` in the build stage, then `COPY --from=build --chown=<user>:<user> /empty /run/app-secrets`). Docker copies that ownership into a fresh named volume mounted there, so a non-root container can write it.
+- Slim and distroless bases may lack `ca-certificates`: install it or every outbound TLS call fails.
 - Private deps: `RUN --mount=type=secret,id=gh_token ...` and fail the build loudly if the token is missing (`test -s /run/secrets/gh_token || exit 1`). Never let a missing token produce a stub that exits 0. Compose passes it with `build: { context: ., secrets: [gh_token] }` plus top-level `secrets: { gh_token: { environment: GH_TOKEN } }`, run as `GH_TOKEN=$(gh auth token) docker compose up --build`.
 - Copy `docker-entrypoint.sh` (below) and use it as `ENTRYPOINT`.
 - `.dockerignore`: `.git`, `node_modules`, `.venv`, `.env*` (but keep `.env.example`), build output, test data.
 
 ### docker-entrypoint.sh (secrets without bash on the host)
-Loads generated secret files into env vars, so the app needs no code change:
+Generates missing secrets (only when compose asks) and loads the files into env vars, so the app needs no code change:
 ```sh
 #!/bin/sh
 set -e
+# Only compose sets APP_SECRETS_GENERATE. Hosted deploys (Railway, Cloud Run) never do, so they skip this.
+if [ "${APP_SECRETS_GENERATE:-}" = 1 ]; then
+  for n in POSTGRES_PASSWORD APP_ADMIN_TOKEN; do
+    f=/run/app-secrets/$n
+    [ -s "$f" ] || { head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$f"; chmod 444 "$f"; }
+  done
+fi
 if [ -d /run/app-secrets ]; then
   for f in /run/app-secrets/*; do
     [ -f "$f" ] || continue
@@ -54,28 +63,23 @@ if [ -d /run/app-secrets ]; then
 fi
 exec "$@"
 ```
-An env var the user set explicitly wins over the generated file.
+An env var the user set explicitly wins over the generated file. Generation runs as the image's non-root user, so no root helper container is needed.
 
 ### compose.yaml
 Everything needed to start comes from compose itself. No `.env` required.
 
 ```yaml
 services:
-  secrets-init:            # one-shot: generates missing secrets once, keeps them forever
-    image: alpine:3.20
-    command:
-      - sh
-      - -c
-      - |
-        for n in POSTGRES_PASSWORD APP_ADMIN_TOKEN; do
-          [ -s /s/$$n ] || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /s/$$n
-        done
-        chmod 444 /s/*
-        echo "admin token: $$(cat /s/APP_ADMIN_TOKEN)"
-    volumes: [app-secrets:/s]
+  secrets-init:            # one-shot, non-root: the app entrypoint generates missing secrets, keeps them forever
+    image: ${APP_IMAGE:-ghcr.io/<owner>/<repo>:latest}
+    pull_policy: never     # `app` pulls or builds this tag; a pull here fails first with "denied"
+    environment: { APP_SECRETS_GENERATE: "1" }
+    command: ["true"]
+    volumes: [app-secrets:/run/app-secrets]
 
   db:
     image: pgvector/pgvector:pg16           # pinned; plain postgres:16-alpine if no vectors
+    user: postgres
     environment:
       POSTGRES_USER: app
       POSTGRES_DB: app
@@ -87,7 +91,9 @@ services:
 
   migrate:                 # one-shot: schema/migrations, reruns safely on every up
     image: ${APP_IMAGE:-ghcr.io/<owner>/<repo>:latest}    # no build: here, only `app` builds the shared tag
-    command: ["npm", "run", "migrate"]
+    pull_policy: never
+    # retries: `compose restart` starts it before db is back (depends_on only gates `up`)
+    command: ["sh", "-c", "for i in $$(seq 60); do npm run migrate && exit 0; sleep 2; done; exit 1"]
     environment: { DATABASE_HOST: db }
     volumes: [app-secrets:/run/app-secrets:ro]
     depends_on: { db: { condition: service_healthy } }
@@ -106,6 +112,9 @@ volumes: { db-data: {}, app-secrets: {} }
 ```
 Rules:
 - The template is a Node + Postgres example. Drop `db`/`migrate`/`backup` if the app has no server database (SQLite goes in a named volume), drop `APP_ADMIN_TOKEN` if the app has no auth, and swap `npm`/`node` for the repo's runtime.
+- No database: drop `secrets-init` too; `app` sets `APP_SECRETS_GENERATE: "1"` and mounts `app-secrets` read-write.
+- Every container runs non-root, one-shots included (`user: postgres` on `db`). No root `alpine` helpers. `backup` is the exception: it writes into the user's `./backups` folder.
+- Siblings that reuse the app image (`secrets-init`, `migrate`) set `pull_policy: never`.
 - The compose file must start with no source present: the default `image:` is the published ghcr tag, so someone who downloads only `compose.yaml` pulls instead of building. `build:` is for developers (`docker compose up -d --build`).
 - Exactly one service gets `build:` per image tag. Two services building the same tag fail with `image ... already exists`.
 - If the repo already has a `docker-compose.yml` that must stay, put the new file in a subfolder (`standalone/compose.yaml`, `build: { context: .. }`). A `compose.yaml` next to it silently wins.
@@ -115,6 +124,7 @@ Rules:
 - Ports bind to `127.0.0.1` unless the user asked for LAN or internet exposure. Databases publish no host port.
 - Named volumes for all data. No bind mounts of app code or single files. Named volumes also avoid slow and broken bind mounts on Windows and macOS.
 - Healthcheck must hit something real, not a route that returns 200 while tools are missing.
+- A one-shot that waits on another service retries in its own command (`migrate` above, `ollama-pull` below): `docker compose restart` ignores `depends_on`.
 
 ### Ollama (only if the app embeds or generates locally)
 ```yaml
@@ -125,7 +135,7 @@ Rules:
   ollama-pull:                              # one-shot model download, shows progress in logs
     image: alpine/ollama:0.34.4
     environment: { OLLAMA_HOST: "ollama:11434" }
-    entrypoint: ["ollama", "pull", "nomic-embed-text"]
+    entrypoint: ["sh", "-c", "for i in $$(seq 60); do ollama pull nomic-embed-text && exit 0; sleep 2; done; exit 1"]
     depends_on: { ollama: { condition: service_healthy } }
 ```
 - Add `ollama-models: {}` to the top-level `volumes:`, or compose refuses the file.
@@ -151,7 +161,7 @@ The `./backups` bind mount is deliberate: the user must be able to see and copy 
 - `.gitattributes`: `* text=auto eol=lf` so shell scripts and env files keep LF on Windows checkouts.
 - `INSTALL.md` next to the compose file, written for someone who has never used a terminal. Sections, in order:
   1. **What you get**: one sentence, plus what it costs in disk and time on first start.
-  2. **Before you start**: Docker Desktop (links for Windows and Mac), started and showing "running"; GitHub access if the repo or images are private (`gh auth login`, or `docker login ghcr.io`).
+  2. **Before you start**: Docker Desktop (links for Windows and Mac), started and showing "running"; GitHub access if the repo or images are private: `gh auth login`, then `gh auth refresh -h github.com -s read:packages` (login alone lacks it), then `gh auth token | docker login ghcr.io -u <github user> --password-stdin`.
   3. **Install**: numbered copy-paste commands. Where Windows and Mac differ, show both (PowerShell and Terminal). Never assume bash on Windows.
   4. **Check it works**: the URL to open, what a good response looks like, how to get the admin token.
   5. **Connect it**: how to point Claude, a CLI or a browser at it, with the exact setting names.
@@ -159,23 +169,26 @@ The `./backups` bind mount is deliberate: the user must be able to see and copy 
   7. **If something goes wrong**: the three most likely failures from this run and `references/containers-traps.md` (port in use, Docker not running, first start still downloading), each as symptom then fix, plus `docker compose logs <service>`.
   Link it from the repo README's "Get it running" section instead of duplicating it. Every command in it was run at least once this session (step 4, or by hand in the test clone); mark any that were not.
 - `.github/workflows/publish.yml` from `assets/publish.yml` in the build skill directory: multi-arch (`linux/amd64,linux/arm64`) image to ghcr.io on tag push. Private org images need `docker login ghcr.io` with a PAT scoped `read:packages`. Say so in the README.
+- Optional `install.sh`: `docker compose pull --quiet app` and `up -d --wait --pull never` if it worked, else `up -d --wait --build`. It hides the `denied` warning a non-logged-in user sees before the build fallback. Without it, list that warning in INSTALL.md troubleshooting as harmless.
 
 ## 4. Verify on a clean copy (mandatory)
 
 Do not claim success from reading files. From the worktree, after committing the new files on the `dockerize` branch:
 ```bash
-P=dz-test-$(date +%s); export APP_IMAGE=$P:local APP_PORT=0   # own image tag and a free port: never overwrite or collide with someone else's
-tmp=$(mktemp -d) && git clone -q --branch dockerize . "$tmp/app" && cd "$tmp/app"   # copy any stub .env for external keys in here now: the clone has none
+P=dz-test-$(date +%s); export APP_IMAGE=$P:local APP_PORT=0   # own project, image tag and a free port: never overwrite or collide with someone else's
+tmp=$(mktemp -d "$PWD/../$P.XXXX") && git clone -q --branch dockerize . "$tmp/app" && cd "$tmp/app"   # on Docker's disk, not /tmp; copy any stub .env for external keys in here now
 docker compose -p $P up -d --build --wait --wait-timeout 600   # every service healthy or completed
 docker compose -p $P ps -a                                     # one-shots exited 0
 curl -fsS http://$(docker compose -p $P port app 3000)/health  # real response
-docker compose -p $P logs secrets-init | tail -2               # token printed
-docker compose -p $P restart && docker compose -p $P up -d --wait   # second start: same secrets, data kept
-docker compose -p $P exec -T app sh -c 'id -u'                 # non-root (not 0)
-docker buildx build --platform linux/arm64 -t dz-arm-check . && docker image rm dz-arm-check   # arm64 builds (needs QEMU unless the build stage uses $BUILDPLATFORM; skip only if disk or time is short, and say so)
-docker compose -p $P down -v --rmi local && docker run --rm -v "$tmp:/t" alpine:3.20 rm -rf /t/app && rm -rf "$tmp"   # always clean up (backups/ is root-owned on Linux)
+docker compose -p $P exec -T app test -s /run/app-secrets/APP_ADMIN_TOKEN && echo token generated   # never print the value
+docker compose -p $P restart && docker wait $(docker compose -p $P ps -aq migrate)   # prints 0: the one-shot survives restart (check before any `up`, which reruns it)
+docker compose -p $P up -d --wait                              # second start: same secrets, data kept
+for c in $(docker compose -p $P ps -aq); do docker inspect -f '{{.Name}} user={{.Config.User}}' $c; done   # every container non-root, one-shots included
+docker buildx build --platform linux/arm64 -t $P-arm . && docker image rm $P-arm   # arm64 builds (needs QEMU unless the build stage uses $BUILDPLATFORM; skip only if disk or time is short, and say so)
+docker compose -p $P down -v && docker image rm $P:local && docker run --rm -v "$tmp:/t" alpine:3.20 rm -rf /t/app && rm -rf "$tmp"   # always clean up (backups/ is root-owned on Linux)
 ```
-Then prove the platforms this machine cannot: copy `assets/verify-matrix.yml` from the build skill directory into the repo's `.github/workflows/`, replace every `<placeholder>` in it, push the branch (ask first) and watch it with `gh run watch`. It runs the same checks on `ubuntu-latest` and `ubuntu-24.04-arm` (real arm64, what Apple Silicon Macs run) and checks a Windows checkout keeps LF and the compose file parses. GitHub's Windows runners only run Windows containers, so Docker Desktop on Windows still needs one human run; say so in the report.
+Remove only what this run created: its `-p` project and exact tags. Other agents share the daemon, so never `docker system prune`, `builder prune`, or delete by age.
+Then prove the platforms this machine cannot: copy `assets/verify-matrix.yml` from the build skill directory into the repo's `.github/workflows/`, replace every `<placeholder>` in it, push the branch (ask first) and watch it with `gh run watch`. It runs the same checks on `ubuntu-latest` and `ubuntu-24.04-arm` (real arm64, what Apple Silicon Macs run) and checks on `windows-latest` that a Windows checkout keeps LF and the compose file parses. If GitHub-hosted runners are blocked (billing), swap in a third-party runner's labels. Windows runners cannot run Linux containers, so Docker Desktop on Windows still needs one human run; say so in the report.
 
 Pass = all of the above green. Anything the user must supply (external keys) is either stubbed in a `.env` copied into the test clone or the feature is shown to fail gracefully.
 

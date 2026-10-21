@@ -48,10 +48,7 @@ Too many skills installed. Claude Code fits all skill descriptions into a budget
 
 ## Contributing
 
-- Edit a skill, then run `bash scripts/green.sh`.
-- Changed a description? Re-run the trigger evals above before opening a PR.
-- Hit a packaging failure the traps files don't cover? Add it to `skills/build/references/containers-traps.md` or `plugins-traps.md` in the format at the top of the file. Only record traps you reproduced and then verified fixed.
-- Bump `version` in `.claude-plugin/plugin.json` on every behaviour change.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
