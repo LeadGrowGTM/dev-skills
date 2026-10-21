@@ -1,6 +1,6 @@
 ---
 name: build
-description: Build features test-first and package projects so other people can install them. Use when the user wants to build a feature or fix a bug test-first, says tdd, red-green, write the failing test first, or make sure the tests really pass, or says dockerize this, make this installable, one-command setup, docker compose for this repo, make it run on Windows and Mac, or wants skills, hooks, agents, commands or MCP servers turned into a Claude Code plugin (pluginize this, make this a plugin, package these skills, share my skills with the team). Writes the check before the code, and verifies on a clean copy before claiming success.
+description: Build, debug, deploy and package software with checks that prove it works. Use when the user wants to build a feature or fix a bug test-first (tdd, red-green, write the failing test first, make sure the tests really pass), says debug this, find the root cause, it still fails after the fix, or something is broken or flaky, writes or deploys a Cloudflare Worker (wrangler, secrets, rollback), a trigger.dev task or schedule, or a Supabase or Postgres migration, RLS policy, constraint or edge function, says dockerize this, make this installable, one-command setup, or wants skills, hooks, agents, commands or MCP servers turned into a Claude Code plugin (pluginize this, make this a plugin, share my skills with the team). Writes the check before the code and verifies before claiming success.
 ---
 
 # build
@@ -10,11 +10,13 @@ Pick the job, read its reference before writing anything, then follow it.
 | Task | Read first |
 |---|---|
 | Build a feature or fix a bug test-first | `references/tdd.md` |
+| Debug: broken, failing, flaky, or the fix did not take | `references/debug.md` |
+| Write or deploy on Cloudflare Workers, trigger.dev, Supabase or Postgres | `references/platforms.md` |
 | Package a repo as a Docker one-command install | `references/containers.md` |
 | Package skills/hooks/agents/MCP into a Claude Code plugin | `references/plugins.md` |
 
 Work that spans two rows reads both (a plugin whose MCP server needs its own
-backend; a Dockerfile change that needs a regression test).
+backend; a bug fix that needs a regression test; a Worker you are debugging).
 
 ## Rules for every row
 
