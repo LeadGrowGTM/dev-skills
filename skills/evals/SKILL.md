@@ -12,6 +12,7 @@ Pick the job, read its reference.
 | Write or run `claude plugin eval` cases and graders | `references/plugin-eval.md` |
 | Turn session logs into test cases | `references/mining.md` |
 | Tune skill descriptions against the cases | `references/hillclimb.md` |
+| Write or fix a skill description, a skill body, a reference file, or an agent-facing doc | `references/writing-for-agents.md` |
 
 Scripts in this skill's directory (stdlib Python, take `--plugin DIR`):
 `scripts/new_case.py` (one confusion-matrix case), `scripts/mine.py` (logs to

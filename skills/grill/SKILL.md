@@ -9,6 +9,9 @@ Input: a written plan file. If the plan only exists in chat, write it to a file 
 
 ## Rounds 1-5, unattended
 
+Each round works one frontier, not a list you thought of. Which questions belong in
+this round, and which must wait, is set by `references/design-tree.md`.
+
 Each round:
 1. Send `references/adversary-prompt.md` to an adversary that cannot edit:
    a general-purpose subagent told it is read-only, or, when the `codex` CLI is
@@ -43,3 +46,9 @@ change the plan's structure; it is the ceiling.
 
 Recount the numbers before writing them. An empty "accepted risks" on a real plan
 means the grill was theatre.
+
+## After the grill
+
+A settled plan becomes a spec the next session can act on without re-interviewing
+anyone. That step is `references/to-spec.md`: pure synthesis, no new questions. If
+gaps remain, go back to Round 1 rather than writing around them.

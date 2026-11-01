@@ -14,6 +14,7 @@ Pick the job, read its reference before writing anything, then follow it.
 | Write or deploy on Cloudflare Workers, trigger.dev, Supabase or Postgres | `references/platforms.md` |
 | Package a repo as a Docker one-command install | `references/containers.md` |
 | Package skills/hooks/agents/MCP into a Claude Code plugin | `references/plugins.md` |
+| Answer one design question with throwaway code before committing to a shape | `references/prototype.md` |
 
 Work that spans two rows reads both (a plugin whose MCP server needs its own
 backend; a bug fix that needs a regression test; a Worker you are debugging).
