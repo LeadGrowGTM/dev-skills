@@ -2,8 +2,8 @@
 
 Once the questions are settled, the thinking has to land somewhere durable that a
 later session can act on without re-interviewing anyone. This is that step: pure
-synthesis, no new interview. If gaps remain, go back to [grilling] rather than
-inventing answers here.
+synthesis, no new interview. If gaps remain, go back to Round 1 in `SKILL.md`
+rather than inventing answers here.
 
 Adapted from Matt Pocock's `to-spec` skill (`skills/engineering/to-spec`,
 upstream `github.com/mattpocock/skills` at `4ae2317`, MIT, Copyright (c) 2026 Matt
@@ -70,10 +70,9 @@ Anything else a later reader needs.
 
 Write the spec where the work will read it - the task's brief or the issue the
 work came from - and state plainly that it is ready to be sliced. Do not start
-implementing from the spec in the same breath: slicing comes next
-(`references/to-tickets` in this plugin's sibling skills, or the tracker's own
-fragmentation), and each slice should be a thin end-to-end path rather than a
-layer.
+implementing from the spec in the same breath: slicing comes next (whatever
+slicing the tracker or the task's own brief already provides), and each slice
+should be a thin end-to-end path rather than a layer.
 
 ## Anti-patterns
 
